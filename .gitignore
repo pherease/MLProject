@@ -1,2 +1,6 @@
-data/
 .DS_Store
+data/
+data64x64/
+*.jpg
+*.png
+*.ipynb

@@ -1,6 +1,16 @@
 .DS_Store
+<<<<<<< HEAD
 data/
 data64x64/
 *.jpg
 *.png
 *.ipynb
+=======
+
+data/
+data64x64/
+
+*.jpg
+*.jpeg
+*.png
+>>>>>>> b6d67621c339d7e2cf2ba5a0cccc5788d92850a8

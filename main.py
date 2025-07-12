@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-import matplotlib.pylab as plt
+import matplotlib.pyplot as plt
 import pandas as pd
 
 import utils
@@ -10,6 +10,16 @@ import cv2
 from tensorflow.keras import layers
 from sklearn.model_selection import train_test_split
 from tensorflow.keras import layers, callbacks
+from tensorflow.keras import mixed_precision
+
+mixed_precision.set_global_policy('mixed_float16')
+BATCH = 4
+EPOCHS = 20
+
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    tf.config.experimental.set_memory_growth(gpus[0], True)
+
 
 
 all_paths, all_labels, label_encoder = utils.load_paths_and_labels("data.csv")
@@ -26,8 +36,7 @@ paths_train, paths_val, labs_train, labs_val = train_test_split(
 )
 
 # 4) build tf.data.Datasets
-BATCH = 32
-train_ds = utils.make_dataset(paths_train, labs_train, BATCH, shuffle=True)
+train_ds = utils.make_dataset(paths_train, labs_train, BATCH, shuffle=False)
 val_ds   = utils.make_dataset(paths_val,   labs_val,   BATCH, shuffle=False)
 test_ds  = utils.make_dataset(paths_test,  labs_test,  BATCH, shuffle=False)
 
@@ -52,11 +61,12 @@ def build_model(num_classes):
         layers.Dense(num_classes, activation='softmax')
     ])
 
-model = build_model(num_classes = len(label_encoder.classes_))
+model = build_model(num_classes=len(label_encoder.classes_))
 model.compile(
     optimizer="adam",
     loss="sparse_categorical_crossentropy",
-    metrics=["accuracy"]
+    metrics=["accuracy"],
+    jit_compile=False         
 )
 model.summary()
 
@@ -66,9 +76,6 @@ history = model.fit(
     train_ds,
     validation_data=val_ds,
     epochs = 20,
-    callbacks=[
-        callbacks.EarlyStopping(patience=3, restore_best_weights=True)
-    ]
 )
 
 # ——————————————— Save & Evaluate ———————————————

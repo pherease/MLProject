@@ -1,3 +1,13 @@
-data/
 split_data/
 .DS_Store
+__pycache__
+.vscode
+.qodo
+.pytest_cache
+
+tests
+data
+data64x64
+*.jpg
+*.png
+*.ipynb

@@ -126,6 +126,7 @@ def make_dataset(
     paths: Sequence[str] | np.ndarray,
     labels: Sequence[int] | np.ndarray,
     batch_size: int = 4,
+    autotune: bool = False,
     *,
     shuffle: bool = False,
 ) -> tf.data.Dataset:
@@ -134,8 +135,15 @@ def make_dataset(
     if shuffle:
         ds = ds.shuffle(buffer_size=min(SHUFFLE_BUF, len(paths)), seed=42)
 
-    return (
-        ds.map(_load_and_preprocess, num_parallel_calls=NUM_PAR_CALLS)
-        .batch(batch_size)
-        .prefetch(PREFETCH_BUFS)
+    if autotune:
+        return (
+            ds.map(_load_and_preprocess, num_parallel_calls=NUM_PAR_CALLS)
+            .batch(batch_size)
+            .prefetch(PREFETCH_BUFS))
+    else:
+        return (
+            ds
+            .map(_load_and_preprocess, num_parallel_calls=tf.data.AUTOTUNE)
+            .batch(batch_size)
+            .prefetch(buffer_size=tf.data.AUTOTUNE)
     )

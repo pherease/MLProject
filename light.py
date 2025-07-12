@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 # check.py  – diagnostic script for TrashNet project
+
 # -----------------------------------------------
-import os, random, collections, math, numpy as np, pandas as pd, tensorflow as tf
+import os, random, collections, math, numpy as np, pandas as pd
+os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async" 
+import tensorflow as tf
 import matplotlib, matplotlib.pyplot as plt
 import utils
 import pathlib
@@ -19,13 +22,14 @@ random.seed(SEED); np.random.seed(SEED); tf.random.set_seed(SEED)
 # ──────────────── Settings ──────────────────────────────────
 mixed_precision.set_global_policy('mixed_float16')
 matplotlib.use("Agg")
+tf.config.optimizer.set_jit(False)
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
     tf.config.experimental.set_memory_growth(gpus[0], True)
 DATA_CSV = "data.csv"
 # ───── Hyperparametes ─────────────────────────────────────────────────
 LEARN_RATE = 1e-4
-BATCH    = 8
+BATCH    = 4
 # ───── ConfusionMatrixSaver ─────────────────────────────────────────────────
 class ConfMatrixSaver(tf.keras.callbacks.Callback):
     """Save a confusion-matrix PNG after each epoch."""
@@ -214,6 +218,6 @@ history = model.fit(
     validation_data=val_ds,
     epochs=50,
     class_weight=class_w,
-    callbacks=[cm_saver],      # ← add here
+    callbacks=[cm_saver],
 )
 model.save("model_trained.keras")

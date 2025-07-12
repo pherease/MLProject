@@ -80,37 +80,45 @@ train_ds = utils.make_dataset(tr_p, tr_l, BATCH, shuffle=True)
 val_ds   = utils.make_dataset(va_p, va_l, BATCH, shuffle=False)
 
 # ───── sanity-plot one val batch with augmentations ────────────────
-# 1) grab one batch
+
+def make_augment():
+    return tf.keras.Sequential([
+        layers.RandomRotation(0.10),
+        layers.RandomFlip("horizontal_and_vertical"),
+        layers.RandomContrast(0.10),
+        layers.RandomTranslation(0.05, 0.05),
+        layers.Lambda(lambda t: tf.clip_by_value(t, 0., 1.))
+    ], name="augment")
+
+# 1) grab one batch  ─────────────────────────────────────────────
 imgs, lbls = next(iter(val_ds))
 
-# 2) re-construct your augmentation pipeline exactly as in build_model()
-augmentation = tf.keras.Sequential([
-    layers.RandomRotation(0.10),
-    layers.RandomFlip("horizontal_and_vertical"),
-    layers.RandomContrast(0.10),
-    layers.RandomTranslation(0.05, 0.05),
-    layers.Lambda(lambda t: tf.clip_by_value(t, 0., 1.))
-])
+# → cast originals to float32 so Matplotlib is happy
+imgs32 = tf.cast(imgs, tf.float32)
 
-# 3) apply it (will be in float16 under mixed_precision)
-aug_imgs = augmentation(imgs, training=True)
+# 2) augmentation preview (already cast to float32 below)
+aug_preview = make_augment()                     # fresh instance
+aug_imgs = aug_preview(imgs32, training=True)    # ← float16
 
-# 4) cast back to float32 so matplotlib can plot it
+# ↓ cast so both rows are float32
 aug_imgs = tf.cast(aug_imgs, tf.float32)
 
-# 5) plot originals (row 0) vs augmented (row 1)
-batch_size = imgs.shape[0]
+# 3) plot originals vs augmented  ────────────────────────────────
+batch_size = imgs32.shape[0]
 fig, axes = plt.subplots(2, batch_size, figsize=(batch_size * 2.5, 5))
+
 for i in range(batch_size):
-    axes[0, i].imshow(np.clip(imgs[i].numpy(), 0, 1))
+    # originals
+    axes[0, i].imshow(np.clip(imgs32[i].numpy(), 0, 1))
     axes[0, i].set_title(le.inverse_transform([lbls[i].numpy()])[0])
     axes[0, i].axis("off")
 
+    # augmented
     axes[1, i].imshow(np.clip(aug_imgs[i].numpy(), 0, 1))
     axes[1, i].set_title("augmented")
     axes[1, i].axis("off")
 
-plt.tight_layout()
+fig.tight_layout()
 fig.savefig("val_batch_with_aug.png")
 print("Saved → val_batch_with_aug.png")
 
@@ -123,41 +131,83 @@ cw_vals = class_weight.compute_class_weight(
 )
 class_w = dict(enumerate(cw_vals))
 
-
-def build_model(num_classes=9):
-    inputs = layers.Input(shape=(256,256,3))
-    x = augment(inputs)
-
-    # ↓ stem
-    x = layers.Conv2D(32, 3, strides=2, padding='same', use_bias=False)(x)
+def dw_sep_block(x, out_ch):
+    """Depth-wise separable conv → BN → ReLU → 1×1 conv → BN → ReLU."""
+    x = layers.DepthwiseConv2D(3, padding="same", use_bias=False)(x)
     x = layers.BatchNormalization()(x)
     x = layers.ReLU()(x)
 
-    # ↓ lightweight body (4 residual DW blocks)
-    for out_ch in [64, 128, 128, 256]:
-        y = dw_block(x, out_ch)
-        x = layers.add([x, y])           # residual shortcut
+    x = layers.Conv2D(out_ch, 1, use_bias=False)(x)
+    x = layers.BatchNormalization()(x)
+    return layers.ReLU()(x)
 
+
+def projection_shortcut(x, out_ch):
+    """1×1 projection to match channel depth before residual add."""
+    x = layers.Conv2D(out_ch, 1, use_bias=False)(x)
+    return layers.BatchNormalization()(x)
+
+def build_model(num_classes=9):
+    # ---------- input & basic aug ----------
+    inputs = layers.Input(shape=(524, 524, 3))
+    x = layers.Resizing(256, 256)(inputs)
+
+    # (you already defined make_augment elsewhere)
+    x = make_augment()(x)          # ← fresh augmentation
+
+    # ---------- stem ----------
+    x = layers.Conv2D(32, 3, strides=2, padding="same",
+                      use_bias=False)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
+
+    # ---------- Block 1 (32 → 64 channels) ----------
+    y = dw_sep_block(x, 64)
+    s = projection_shortcut(x, 64)    # match channels
+    x = layers.Add()([s, y])
+
+    # ---------- Block 2 (64 → 128 channels) ----------
+    y = dw_sep_block(x, 128)
+    s = projection_shortcut(x, 128)
+    x = layers.Add()([s, y])
+
+    # ---------- Block 3 (128 → 128 channels) ----------
+    y = dw_sep_block(x, 128)
+    # same depth → identity shortcut
+    x = layers.Add()([x, y])
+
+    # ---------- Block 4 (128 → 256 channels) ----------
+    y = dw_sep_block(x, 256)
+    s = projection_shortcut(x, 256)
+    x = layers.Add()([s, y])
+
+    # ---------- classifier head ----------
     x = layers.GlobalAveragePooling2D()(x)
-
-    # ↓ classifier head
-    x = layers.Dropout(0.3)(x)
-    x = layers.Dense(128, activation='relu')(x)
-    x = layers.Dropout(0.3)(x)
+    x = layers.Dropout(0.30)(x)
+    x = layers.Dense(128, activation="relu")(x)
+    x = layers.Dropout(0.30)(x)
     outputs = layers.Dense(num_classes,
-                           activation='softmax',
-                           dtype='float32')(x)
+                           activation="softmax",
+                           dtype="float32")(x)
 
     return tf.keras.Model(inputs, outputs)
 
 
-model = build_model(num_classes=len(le.classes_))
-model.compile(optimizer = tf.keras.optimizers.Adam(LEARN_RATE),
-              loss = "sparse_categorical_crossentropy", 
-              metrics=["accuracy"])
-
-
 cm_saver = ConfMatrixSaver(val_ds, le.classes_, out_dir="cm_plots")
+
+loss = tf.keras.losses.SparseCategoricalCrossentropy(
+           from_logits=False)
+
+lr_sched = tf.keras.optimizers.schedules.CosineDecayRestarts(
+               initial_learning_rate=LEARN_RATE,
+               first_decay_steps=len(train_ds)*30)
+
+model = build_model(num_classes=len(le.classes_))
+model.compile(optimizer = tf.keras.optimizers.Adam(lr_sched),
+              loss = loss, 
+              metrics=["accuracy"])
+model.summary()
+
 
 history = model.fit(
     train_ds,

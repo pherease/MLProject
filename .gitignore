@@ -10,3 +10,4 @@ data64x64
 *.jpg
 *.png
 *.ipynb
+split_data/

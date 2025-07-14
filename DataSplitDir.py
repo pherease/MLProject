@@ -3,6 +3,7 @@ import shutil
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
+from PIL import Image  # ✅ NEW
 
 # ------------------------------
 # PARAMETERS
@@ -10,6 +11,7 @@ from tqdm import tqdm
 input_dir = './data'
 output_dir = './split_data'
 split_ratios = (0.4, 0.3, 0.3)  # train, val, test
+IMG_SIZE = (256, 256)  # ✅ You can change to (128,128) or (512,512) etc.
 
 assert sum(split_ratios) == 1.0, "Splits must sum to 1.0"
 
@@ -40,12 +42,7 @@ print(f"Found classes: {classes}")
 
 make_dirs(output_dir, classes)
 
-# Prepare CSV data lists
-csv_data = {
-    'train': [],
-    'val': [],
-    'test': []
-}
+csv_data = {'train': [], 'val': [], 'test': []}
 
 for cls in tqdm(classes, desc="Processing classes"):
     cls_dir = os.path.join(input_dir, cls)
@@ -58,24 +55,24 @@ for cls in tqdm(classes, desc="Processing classes"):
         random_state=42
     )
 
-    # Copy files and build CSV data
-    for img in tqdm(train_split, desc=f"{cls} - train", leave=False):
-        src = os.path.join(cls_dir, img)
-        dst = os.path.join(output_dir, 'train', cls, img)
-        shutil.copy2(src, dst)
-        csv_data['train'].append({'category': cls, 'indexInCategory': int(img.split('_')[-1].split('.')[0]), 'filePath': f"split_data/train/{cls}/{img}"})
+    # ------------------------------
+    # Modified loop to resize & save
+    # ------------------------------
+    for split_name, split_images in zip(['train', 'val', 'test'], [train_split, val_split, test_split]):
+        for img in tqdm(split_images, desc=f"{cls} - {split_name}", leave=False):
+            src = os.path.join(cls_dir, img)
+            dst = os.path.join(output_dir, split_name, cls, img)
 
-    for img in tqdm(val_split, desc=f"{cls} - val", leave=False):
-        src = os.path.join(cls_dir, img)
-        dst = os.path.join(output_dir, 'val', cls, img)
-        shutil.copy2(src, dst)
-        csv_data['val'].append({'category': cls, 'indexInCategory': int(img.split('_')[-1].split('.')[0]), 'filePath': f"split_data/val/{cls}/{img}"})
+            # Open, resize, and save
+            with Image.open(src) as im:
+                im = im.resize(IMG_SIZE, Image.LANCZOS)
+                im.save(dst)
 
-    for img in tqdm(test_split, desc=f"{cls} - test", leave=False):
-        src = os.path.join(cls_dir, img)
-        dst = os.path.join(output_dir, 'test', cls, img)
-        shutil.copy2(src, dst)
-        csv_data['test'].append({'category': cls, 'indexInCategory': int(img.split('_')[-1].split('.')[0]), 'filePath': f"split_data/test/{cls}/{img}"})
+            csv_data[split_name].append({
+                'category': cls,
+                'indexInCategory': int(img.split('_')[-1].split('.')[0]),
+                'filePath': f"split_data/{split_name}/{cls}/{img}"
+            })
 
 # ------------------------------
 # Write CSV files
@@ -84,4 +81,4 @@ for split in ['train', 'val', 'test']:
     df = pd.DataFrame(csv_data[split])
     df.to_csv(os.path.join(output_dir, f"{split}.csv"), index=False)
 
-print("✅ Data split complete and CSV files created.")
+print("✅ Data split complete, images resized, and CSV files created.")

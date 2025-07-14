@@ -19,15 +19,15 @@ from tensorflow.keras import layers
 # Global defaults
 # ---------------------------------------------------------------------------
 IMG_SIZE: Tuple[int, int] = (256, 256)
-NUM_PAR_CALLS = 4     # parallel JPEG decodes
-SHUFFLE_BUF = 200     # lower = less RAM, still random
-PREFETCH_BUFS = 2
+NUM_PAR_CALLS = 8     # parallel JPEG decodes
+SHUFFLE_BUF = 5000
+PREFETCH_BUFS = 8
 
 # ---------------------------------------------------------------------------
 # I/O helpers
 # ---------------------------------------------------------------------------
 
-def load_paths_and_labels(csv_path: str | os.PathLike = "data.csv") -> Tuple[np.ndarray, np.ndarray, LabelEncoder]:
+def load_paths_and_labels(csv_path, le = None) -> Tuple[np.ndarray, np.ndarray, LabelEncoder]:
     """Read the project CSV and return file paths, integer labels, encoder.
 
     The CSV is expected to have at least two columns:
@@ -37,12 +37,16 @@ def load_paths_and_labels(csv_path: str | os.PathLike = "data.csv") -> Tuple[np.
     csv_path = Path(csv_path)
     if not csv_path.exists():
         raise FileNotFoundError(csv_path)
-
     df = pd.read_csv(csv_path)
+
     le = LabelEncoder()
     df["label"] = le.fit_transform(df["category"])
     return df["filePath"].to_numpy(), df["label"].to_numpy(), le
 
+
+def encode(csv, le):
+    df = pd.read_csv(csv)
+    return df["filePath"].to_numpy(), le.transform(df["category"])
 
 # ---------------------------------------------------------------------------
 # Dataset splitting with stratification
@@ -109,7 +113,6 @@ def _load_and_preprocess(path: tf.Tensor, label: tf.Tensor) -> Tuple[tf.Tensor, 
     """Read JPEG → resize → scale to [0,1]."""
     img = tf.io.read_file(path)
     img = tf.image.decode_jpeg(img, channels=3)
-    img = tf.image.resize(img, IMG_SIZE)
     img = tf.divide(tf.cast(img, tf.float32), 255.0)
     return img, label
 
@@ -125,7 +128,7 @@ def make_dataset(
     ds = tf.data.Dataset.from_tensor_slices((paths, labels))
 
     if shuffle:
-        ds = ds.shuffle(buffer_size=min(SHUFFLE_BUF, len(paths)), seed=42)
+        ds = ds.shuffle(buffer_size=min(SHUFFLE_BUF, len(paths)), seed=424)
 
     if autotune:
         return (
@@ -148,9 +151,8 @@ def resize(img_size = IMG_SIZE):
 def make_augment():
     return tf.keras.Sequential([
         layers.RandomRotation(0.10),
-        layers.RandomFlip("horizontal_and_vertical"),
+        layers.RandomFlip("horizontal"),
         layers.RandomContrast(0.10),
-        layers.RandomTranslation(0.05, 0.05),
         layers.Lambda(lambda t: tf.clip_by_value(t, 0., 1.))
     ], name="augment")
 
@@ -161,8 +163,8 @@ def show_image_of_batch(ds: tf.data.Dataset, le: LabelEncoder) -> None:
 
     # 3) plot originals vs augmented  ────────────────────────────────
     batch_size = int(imgs32.shape[0]) # type: ignore
-    fig, axes = plt.subplots(batch_size, figsize=(batch_size * 2.5, 5)) # type: ignore
-
+    fig, axes = plt.subplots(2, int(batch_size/2), figsize=(batch_size * 2.5, 5)) # type: ignore
+    axes = axes.flatten()
     for i in range(batch_size):
         # originals
         axes[i].imshow(np.clip(imgs32[i].numpy(), 0, 1)) # type: ignore

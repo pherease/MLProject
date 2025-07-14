@@ -26,3 +26,5 @@ data64x64
 checkpoints
 training_log.csv
 /models
+logs/
+

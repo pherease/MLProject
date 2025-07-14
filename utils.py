@@ -4,7 +4,7 @@ import os
 import collections
 import pathlib
 from pathlib import Path
-from typing import Tuple, List, Sequence
+from typing import Tuple, Sequence
 
 import numpy as np
 import pandas as pd
@@ -13,11 +13,12 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from tensorflow.keras import layers
 
 # ---------------------------------------------------------------------------
 # Global defaults
 # ---------------------------------------------------------------------------
-IMG_SIZE: Tuple[int, int] = (524, 524)
+IMG_SIZE: Tuple[int, int] = (256, 256)
 NUM_PAR_CALLS = 4     # parallel JPEG decodes
 SHUFFLE_BUF = 200     # lower = less RAM, still random
 PREFETCH_BUFS = 2
@@ -138,6 +139,20 @@ def make_dataset(
             .batch(batch_size)
             .prefetch(buffer_size=tf.data.AUTOTUNE)
     )
+
+
+def resize(img_size = IMG_SIZE):
+    return layers.Resizing(img_size, img_size)
+
+
+def make_augment():
+    return tf.keras.Sequential([
+        layers.RandomRotation(0.10),
+        layers.RandomFlip("horizontal_and_vertical"),
+        layers.RandomContrast(0.10),
+        layers.RandomTranslation(0.05, 0.05),
+        layers.Lambda(lambda t: tf.clip_by_value(t, 0., 1.))
+    ], name="augment")
 
 def show_image_of_batch(ds: tf.data.Dataset, le: LabelEncoder) -> None:
     imgs, lbls = next(iter(ds))

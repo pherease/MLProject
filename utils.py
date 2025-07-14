@@ -191,3 +191,19 @@ class ConfusionMatrixSaver(tf.keras.callbacks.Callback):
         ax.set_title(f"Epoch {epoch+1}")
         fig.savefig(self.out_dir / f"cm_epoch_{epoch+1:03d}.png")
         plt.close(fig)
+
+def checkpoint_cb():
+    return tf.keras.callbacks.ModelCheckpoint(
+    filepath="checkpoints/weights_epoch_{epoch:02d}.weights.h5",
+    save_weights_only=True,
+    save_freq="epoch",
+    verbose=1
+)
+
+# 2) Log all losses & metrics to CSV:
+def csv_logger_cb():
+    return tf.keras.callbacks.CSVLogger(
+    filename="training_log.csv",
+    separator=",",
+    append=True
+)

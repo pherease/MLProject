@@ -10,7 +10,7 @@ import utils
 
 from sklearn.utils import class_weight
 from tensorflow.keras import layers, mixed_precision
-from utils import ConfusionMatrixSaver
+from utils import ConfusionMatrixSaver, csv_logger_cb, checkpoint_cb
 
 
 # ───── reproducibility & logging ──────────────────────────────────
@@ -103,7 +103,7 @@ history = model.fit(
     validation_data=val_ds,
     epochs = EPOCH,
     class_weight=class_w,
-    callbacks=[ConfusionMatrixSaver(val_ds, le.classes_, every=3)]
+    callbacks=[ConfusionMatrixSaver(val_ds, le.classes_, every=3), checkpoint_cb(), csv_logger_cb()]
 )
 model.save("model_trained.keras")
 

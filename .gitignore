@@ -11,3 +11,17 @@ data64x64
 *.png
 *.ipynb
 split_data/
+.DS_Store
+__pycache__
+.vscode
+.qodo
+.pytest_cache
+
+tests
+data
+data64x64
+*.jpg
+*.png
+*.ipynb
+checkpoints
+training_log.csv

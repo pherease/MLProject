@@ -10,3 +10,5 @@ data64x64
 *.jpg
 *.png
 *.ipynb
+checkpoints
+training_log.csv

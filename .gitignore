@@ -25,5 +25,6 @@ data64x64
 *.ipynb
 checkpoints
 training_log.csv
-
+/models
 logs/
+

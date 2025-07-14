@@ -9,6 +9,9 @@ data
 data64x64
 *.jpg
 *.png
-*.ipynb
+*.csv
 checkpoints
+
+
 training_log.csv
+split_augment_datasets.py

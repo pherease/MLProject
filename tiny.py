@@ -25,9 +25,9 @@ gpus = tf.config.list_physical_devices('GPU')
 if gpus:
     tf.config.experimental.set_memory_growth(gpus[0], True)
 
-TRAIN_CSV = "./train/train.csv"
-TEST_CSV = "./test/test.csv"
-VAL_CSV = "./validation/val.csv"
+TRAIN_CSV = "./split_data/train.csv"
+TEST_CSV = "./split_data/test.csv"
+VAL_CSV = "./split_data/val.csv"
 # ───── Hyperparametes ─────────────────────────────────────────────────
 LEARN_RATE = 1e-4
 BATCH    = 2

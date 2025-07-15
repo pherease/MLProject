@@ -30,9 +30,9 @@ TEST_CSV = "./split_data/test.csv"
 VAL_CSV = "./split_data/val.csv"
 # ───── Hyperparametes ─────────────────────────────────────────────────
 LEARN_RATE = 1e-4
-BATCH    = 16
+BATCH    = 8
 EPOCH = 60
-IMG_SIZE = 256
+IMG_SIZE = 128
 autotune = True
 
 # ───── load paths / labels & stratified split ────────────────────

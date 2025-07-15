@@ -11,7 +11,7 @@ from PIL import Image  # ✅ NEW
 input_dir = './data'
 output_dir = './split_data'
 split_ratios = (0.6, 0.2, 0.2)  # train, val, test
-IMG_SIZE = (256, 256)  # ✅ You can change to (128,128) or (512,512) etc.
+IMG_SIZE = (128, 128)  # ✅ You can change to (128,128) or (512,512) etc.
 
 assert sum(split_ratios) == 1.0, "Splits must sum to 1.0"
 

@@ -28,3 +28,6 @@ training_log.csv
 /models
 logs/
 
+*.json
+
+tuner_logs/

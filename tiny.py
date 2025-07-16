@@ -2,11 +2,12 @@
 # check.py  – diagnostic script for TrashNet project
 
 # -----------------------------------------------
-import os, random, numpy as np
+import os, random, math
 os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async" 
 import tensorflow as tf
 import matplotlib, matplotlib.pyplot as plt
 import utils
+import numpy as np
 
 from sklearn.utils import class_weight
 from datetime import datetime     
@@ -40,8 +41,8 @@ tensorboard_cb = tf.keras.callbacks.TensorBoard(
         update_freq  = "epoch",      # write once per epoch
         profile_batch=0)             # disable profiler to save space
 # ───── Hyperparametes ─────────────────────────────────────────────────
-LEARN_RATE = 1e-3
-BATCH    = 8
+LEARN_RATE = 1e-2
+BATCH    = 4
 EPOCH = 100
 IMG_SIZE = 524
 autotune = True
@@ -69,7 +70,7 @@ utils.show_image_of_batch(train_ds, le)
 
 
 def build_model():
-    filters = 128
+    filters = 256
     model = tf.keras.Sequential([
         layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3)),
 
@@ -124,9 +125,9 @@ def sparse_focal_loss(gamma: float = 1.0, alpha: float = 0.25):
     return loss_fn
 
 lr_cb = tf.keras.callbacks.ReduceLROnPlateau(monitor="loss", 
-                                             factor = 0.25, 
+                                             factor = 0.5, 
                                              patience = 3, 
-                                             min_lr = 1e-6,
+                                             min_lr = 1e-5,
                                              min_delta = 0.05)
 
 dyn_cb = utils.DynamicMinDelta(reduce_cb = lr_cb, ratio=0.01)
@@ -143,7 +144,7 @@ lr_printer = LrPrinter()
 early_dual_cb = DualEarlyStopping(
     min_delta_train = 0.01,   # x
     min_delta_val   = 0.01,    # y
-    patience        = 5,
+    patience        = 8,
     restore_best_weights = True
 )
 

@@ -5,11 +5,13 @@ import collections
 import pathlib
 from pathlib import Path
 from typing import Tuple, Sequence
+import gc
 
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 import matplotlib.pyplot as plt
+import keras_tuner as kt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
@@ -19,9 +21,9 @@ from tensorflow.keras import layers
 # Global defaults
 # ---------------------------------------------------------------------------
 IMG_SIZE: Tuple[int, int] = (256, 256)
-NUM_PAR_CALLS = 8     # parallel JPEG decodes
+NUM_PAR_CALLS = 32     # parallel JPEG decodes
 SHUFFLE_BUF = 5000
-PREFETCH_BUFS = 8
+PREFETCH_BUFS = 32
 
 # ---------------------------------------------------------------------------
 # I/O helpers
@@ -56,9 +58,9 @@ def stratified_split(
     paths: Sequence[str] | np.ndarray,
     labels: Sequence[int] | np.ndarray,
     *,
-    test_size: float = 0.10,
-    val_size: float = 0.10,
-    random_state: int = 42,
+    test_size: float,
+    val_size: float,
+    random_state: int,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Return **train / val / test** splits with identical class proportions.
 
@@ -120,7 +122,7 @@ def _load_and_preprocess(path: tf.Tensor, label: tf.Tensor) -> Tuple[tf.Tensor, 
 def make_dataset(
     paths: Sequence[str] | np.ndarray,
     labels: Sequence[int] | np.ndarray,
-    batch_size: int = 4,
+    batch_size: int,
     autotune: bool = False,
     *,
     shuffle: bool = False,
@@ -131,18 +133,10 @@ def make_dataset(
         ds = ds.shuffle(buffer_size=min(SHUFFLE_BUF, len(paths)), seed=424)
 
     if autotune:
-        return (
-            ds.map(_load_and_preprocess, num_parallel_calls=NUM_PAR_CALLS)
-            .batch(batch_size)
-            .prefetch(PREFETCH_BUFS))
-    else:
-        return (
-            ds
-            .map(_load_and_preprocess, num_parallel_calls=tf.data.AUTOTUNE)
-            .batch(batch_size)
-            .prefetch(buffer_size=tf.data.AUTOTUNE)
-    )
+        return ds.map(_load_and_preprocess, num_parallel_calls=tf.data.AUTOTUNE).batch(batch_size).prefetch(buffer_size=tf.data.AUTOTUNE)
 
+    else:
+        return ds.map(_load_and_preprocess, num_parallel_calls=NUM_PAR_CALLS).batch(batch_size).prefetch(PREFETCH_BUFS)
 
 def resize(img_size = IMG_SIZE):
     return layers.Resizing(img_size, img_size)
@@ -152,7 +146,7 @@ def make_augment():
     return tf.keras.Sequential([
         layers.RandomRotation(0.10),
         layers.RandomFlip("horizontal"),
-        layers.RandomContrast(0.10),
+        # layers.RandomContrast(0.10),
         layers.Lambda(lambda t: tf.clip_by_value(t, 0., 1.))
     ], name="augment")
 
@@ -202,12 +196,24 @@ class ConfusionMatrixSaver(tf.keras.callbacks.Callback):
             y_true.extend(y.numpy())
 
         cm = confusion_matrix(y_true, y_pred)
-        fig, ax = plt.subplots(figsize=(6, 6))
+        fig, ax = plt.subplots(figsize=(10, 10))
         ConfusionMatrixDisplay(cm, display_labels=self.label_names).plot(
             xticks_rotation=60, cmap="Blues", ax=ax, values_format="d")
         ax.set_title(f"Epoch {epoch+1}")
         fig.savefig(self.out_dir / f"cm_epoch_{epoch+1:03d}.png")
         plt.close(fig)
+
+class LrPrinter(tf.keras.callbacks.Callback):
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        # Get the LR: if it’s a schedule, evaluate it at the current step
+        lr = self.model.optimizer.learning_rate
+        if isinstance(lr, tf.keras.optimizers.schedules.LearningRateSchedule):
+            lr = lr(self.model.optimizer.iterations)
+        # force it into Python float
+        lr = float(tf.keras.backend.get_value(lr))
+        # add to logs so progbar/TensorBoard see it
+        logs["lr"] = lr
 
 def checkpoint_cb():
     return tf.keras.callbacks.ModelCheckpoint(
@@ -224,3 +230,54 @@ def csv_logger_cb():
     separator=",",
     append=True
 )
+
+
+class ALRCLoss(tf.keras.losses.Loss):
+    def __init__(
+        self,
+        num_stddev=3,
+        decay=0.999,
+        mu1_start=25.0,
+        mu2_start=30**2,
+        eps=1e-8,
+        name="alrc_loss"
+    ):
+        # Tell Keras we want per-sample losses (no reduction here)
+        super().__init__(reduction=tf.keras.losses.Reduction.NONE, name=name)
+
+        self.num_stddev = num_stddev
+        self.decay      = decay
+        self.eps        = eps
+
+        # Plain tf.Variables instead of add_weight()
+        # They’re non‑trainable by default.
+        self.mu  = tf.Variable(mu1_start, dtype=tf.float32, trainable=False, name="mu1")
+        self.mu2 = tf.Variable(mu2_start, dtype=tf.float32, trainable=False, name="mu2")
+
+    def call(self, y_true, y_pred):
+        # 1) raw per-sample loss (change to your base loss as needed)
+        raw = tf.keras.losses.sparse_categorical_crossentropy(
+            y_true, y_pred
+        )  # → shape=(batch,)
+
+        # 2) dynamic threshold: μ + num_stddev * sqrt(μ2 - μ^2 + eps)
+        sigma     = tf.sqrt(self.mu2 - self.mu**2 + self.eps)
+        threshold = self.mu + self.num_stddev * sigma
+
+        # 3) clip each element of raw loss to [0, threshold]
+        clipped = tf.minimum(raw, threshold)
+
+        # 4) update the running averages with the *clipped* losses
+        mean_l   = tf.reduce_mean(clipped)
+        mean_l2  = tf.reduce_mean(clipped * clipped)
+
+        # Imperative assigns will run in eager or inside the graph
+        self.mu .assign(self.decay * self.mu  + (1 - self.decay) * mean_l)
+        self.mu2.assign(self.decay * self.mu2 + (1 - self.decay) * mean_l2)
+
+        return clipped
+
+class CleanTuner(kt.tuners.RandomSearch):
+    def run_trial(self, trial, *args, **kw):
+        tf.keras.backend.clear_session(); gc.collect()
+        super().run_trial(trial, *args, **kw)

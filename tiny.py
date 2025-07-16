@@ -10,7 +10,7 @@ import utils
 
 from sklearn.utils import class_weight
 from tensorflow.keras import layers, mixed_precision
-from utils import ConfusionMatrixSaver, csv_logger_cb, checkpoint_cb, make_augment
+from utils import ConfusionMatrixSaver, csv_logger_cb, checkpoint_cb, make_augment, ALRCLoss, LrPrinter
 
 
 # ───── reproducibility & logging ──────────────────────────────────
@@ -29,10 +29,10 @@ TRAIN_CSV = "./split_data/train.csv"
 TEST_CSV = "./split_data/test.csv"
 VAL_CSV = "./split_data/val.csv"
 # ───── Hyperparametes ─────────────────────────────────────────────────
-LEARN_RATE = 1e-4
-BATCH    = 8
-EPOCH = 60
-IMG_SIZE = 128
+LEARN_RATE = 1e-2
+BATCH    = 16
+EPOCH = 50
+IMG_SIZE = 256
 autotune = True
 
 # ───── load paths / labels & stratified split ────────────────────
@@ -63,43 +63,44 @@ cw_vals = class_weight.compute_class_weight(
 )
 class_w = dict(enumerate(cw_vals))
 
-def build_model(num_classes: int = 9):
+def build_model():
+    filters = 128
     model = tf.keras.Sequential([
-    tf.keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3)),
+        layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3)),
 
-    layers.Conv2D(128, (3,3), padding="same", activation='relu'),
-    layers.BatchNormalization(),
-    layers.MaxPooling2D(2,2),
+        layers.Conv2D(filters, (2,2), activation='relu', padding='same'),
+        layers.BatchNormalization(),
+        layers.MaxPooling2D(2,2),
 
-    layers.Conv2D(64, (3,3), padding="same", activation='relu'),
-    layers.BatchNormalization(),
-    layers.MaxPooling2D(2,2),
+        layers.Conv2D(filters//2, (2,2), activation='relu', padding='same'),
+        layers.BatchNormalization(),
+        layers.MaxPooling2D(2,2),
 
-    layers.Conv2D(32, (3,3), padding="same", activation='relu'),
-    layers.BatchNormalization(),
-    layers.MaxPooling2D(2,2),
+        layers.Conv2D(filters//4, (2,2), activation='relu', padding='same'),
+        layers.BatchNormalization(),
+        layers.MaxPooling2D(2,2),
 
-    layers.Conv2D(64, (3,3), padding="same", activation='relu'),
-    layers.BatchNormalization(),
-    layers.MaxPooling2D(2,2),
+        layers.Conv2D(filters//2, (2,2), activation='relu', padding='same'),
+        layers.BatchNormalization(),
+        layers.MaxPooling2D(2,2),
 
-    layers.Conv2D(128, (3,3), padding="same", activation='relu'),
-    layers.BatchNormalization(),
-    layers.MaxPooling2D(2,2),
+        layers.Conv2D(filters, (2,2), activation='relu', padding='same'),
+        layers.BatchNormalization(),
+        layers.MaxPooling2D(2,2),
 
-    layers.GlobalAveragePooling2D(),
+        layers.GlobalAveragePooling2D(),
 
-    layers.Dense(256, activation='relu'),
-    layers.BatchNormalization(),
-    layers.Dropout(0.25),
+        # layers.Dense(dense1, activation='relu'),
+        # layers.BatchNormalization(),
+        # layers.Dropout(0.25),
+        # layers.Dense(dense2, activation="relu"),
 
-    layers.Dense(16, activation="relu"),
-    layers.Dense(num_classes, activation='softmax', dtype='float32')])
-
+        layers.Dense(len(le.classes_), activation='softmax', dtype='float32')
+    ])
     return model
 
 
-def sparse_focal_loss(gamma: float = 2.0, alpha: float = 0.25):
+def sparse_focal_loss(gamma: float = 1.0, alpha: float = 0.25):
     """Sparse-label focal loss that works with int32 *or* int64 y_true."""
     def loss_fn(y_true, y_pred):
         # ensure both tensors share the same integer dtype
@@ -117,21 +118,37 @@ def sparse_focal_loss(gamma: float = 2.0, alpha: float = 0.25):
         return tf.reduce_mean(loss)
     return loss_fn
 
+lr_cb = tf.keras.callbacks.ReduceLROnPlateau(monitor="loss", 
+                                             factor = 0.25, 
+                                             patience = 3, 
+                                             min_lr = 1e-6,
+                                             min_delta = 0.01)
+
+ALRCLoss_fn = ALRCLoss(
+    num_stddev = 2,
+    decay = 0.999,
+    mu1_start = 0.85,
+    mu2_start = 0.90**2
+)
 # loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
 
-model = build_model(num_classes=len(le.classes_))
+model = build_model()
 model.compile(optimizer = tf.keras.optimizers.Adam(LEARN_RATE),
-              loss = sparse_focal_loss(gamma=2.0, alpha=0.25), 
+              loss = ALRCLoss_fn, 
               metrics=["accuracy"])
 model.summary()
 
+lr_printer = LrPrinter()
 
 history = model.fit(
     train_ds,
     validation_data=val_ds,
     epochs = EPOCH,
-    # class_weight=class_w,
-    callbacks=[ConfusionMatrixSaver(val_ds, le.classes_, every=3), checkpoint_cb(), csv_logger_cb()]
+    callbacks=[ConfusionMatrixSaver(val_ds, le.classes_, every=3),  
+               lr_printer,
+               csv_logger_cb(),
+               lr_cb
+               ]
 )
 model.save("model_trained.keras")
 

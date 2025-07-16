@@ -281,3 +281,20 @@ class CleanTuner(kt.tuners.RandomSearch):
     def run_trial(self, trial, *args, **kw):
         tf.keras.backend.clear_session(); gc.collect()
         super().run_trial(trial, *args, **kw)
+
+class DynamicMinDelta(tf.keras.callbacks.Callback):
+    def __init__(self, reduce_cb, ratio):
+        super().__init__()
+        self.reduce_cb = reduce_cb
+        self.ratio = ratio
+        self._initialized = False
+
+    def on_epoch_end(self, epoch, logs=None):
+        # after the very first epoch, set min_delta and never touch it again
+        if not self._initialized and logs is not None:
+            initial_loss = logs.get(self.reduce_cb.monitor)
+            if initial_loss is not None:
+                self.reduce_cb.min_delta = initial_loss * self.ratio
+                self._initialized = True
+                print(f"[DynamicMinDelta] initial loss={initial_loss:.4f}, "
+                      f"setting min_delta={self.reduce_cb.min_delta:.4f}")

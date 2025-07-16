@@ -21,4 +21,4 @@ The above labelling may be further subdivided as required, i.e., Transparent Pla
 
 
 Ideas for AFTER the presentation:
-  - 
+  - utils.csv_logger for each trial

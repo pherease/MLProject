@@ -20,7 +20,7 @@ from tensorflow.keras import layers
 # ---------------------------------------------------------------------------
 # Global defaults
 # ---------------------------------------------------------------------------
-IMG_SIZE: Tuple[int, int] = (256, 256)
+IMG_SIZE: Tuple[int, int] = (524, 524)
 NUM_PAR_CALLS = 32     # parallel JPEG decodes
 SHUFFLE_BUF = 5000
 PREFETCH_BUFS = 32
@@ -298,3 +298,66 @@ class DynamicMinDelta(tf.keras.callbacks.Callback):
                 self._initialized = True
                 print(f"[DynamicMinDelta] initial loss={initial_loss:.4f}, "
                       f"setting min_delta={self.reduce_cb.min_delta:.4f}")
+                
+            
+class DualEarlyStopping(tf.keras.callbacks.Callback):
+    """
+    Stop training when BOTH training accuracy and validation accuracy
+    fail to improve by their respective deltas for `patience` epochs.
+    """
+    def __init__(self,
+                 min_delta_train=0.001,
+                 min_delta_val=0.001,
+                 patience=5,
+                 restore_best_weights=True,
+                 verbose=1):
+        super().__init__()                       # keep this ☑
+        self.min_delta_train  = min_delta_train
+        self.min_delta_val    = min_delta_val
+        self.patience         = patience
+        self.restore_best_weights = restore_best_weights
+        self.verbose          = verbose
+
+    def on_train_begin(self, logs=None):
+        # ── accuracy should go UP, so start at -∞ ──
+        self.best_train   = -np.inf
+        self.best_val     = -np.inf
+        self.wait         = 0
+        self.best_weights = None
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        train_acc = logs.get("accuracy")       # or "acc" depending on Keras version
+        val_acc   = logs.get("val_accuracy")   # might be "val_acc"
+
+        # Handle missing keys gracefully
+        if train_acc is None or val_acc is None:
+            if self.verbose:
+                print("DualEarlyStopping warning: accuracy keys not found in logs.")
+            return
+
+        # ── Improvements: current − best ──
+        improved_train = (train_acc - self.best_train) > self.min_delta_train
+        improved_val   = (val_acc   - self.best_val)   > self.min_delta_val
+
+        if improved_train or improved_val:
+            if improved_train:
+                self.best_train = train_acc
+            if improved_val:
+                self.best_val = val_acc
+                if self.restore_best_weights:
+                    self.best_weights = self.model.get_weights()
+            self.wait = 0
+        else:
+            self.wait += 1
+            if self.wait >= self.patience:
+                if self.verbose:
+                    print(
+                        f"\nEpoch {epoch+1}: DualEarlyStopping — no "
+                        f"Δtrain ≥ {self.min_delta_train} and "
+                        f"no Δval ≥ {self.min_delta_val} for "
+                        f"{self.patience} epochs. Stopping."
+                    )
+                if self.restore_best_weights and self.best_weights is not None:
+                    self.model.set_weights(self.best_weights)
+                self.model.stop_training = True

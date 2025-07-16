@@ -9,8 +9,9 @@ import matplotlib, matplotlib.pyplot as plt
 import utils
 
 from sklearn.utils import class_weight
+from datetime import datetime     
 from tensorflow.keras import layers, mixed_precision
-from utils import ConfusionMatrixSaver, csv_logger_cb, checkpoint_cb, make_augment, ALRCLoss, LrPrinter
+from utils import ConfusionMatrixSaver, csv_logger_cb, checkpoint_cb, make_augment, ALRCLoss, LrPrinter, DualEarlyStopping
 
 
 # ───── reproducibility & logging ──────────────────────────────────
@@ -28,11 +29,21 @@ if gpus:
 TRAIN_CSV = "./split_data/train.csv"
 TEST_CSV = "./split_data/test.csv"
 VAL_CSV = "./split_data/val.csv"
+
+log_dir = os.path.join("logs",
+                       datetime.now().strftime("%Y%m%d-%H%M%S"))
+tensorboard_cb = tf.keras.callbacks.TensorBoard(
+        log_dir      = log_dir,
+        histogram_freq=1,            # weight & activation histograms
+        write_graph  = True,         # full graph for Netron etc.
+        write_images = True,         # first batch input images
+        update_freq  = "epoch",      # write once per epoch
+        profile_batch=0)             # disable profiler to save space
 # ───── Hyperparametes ─────────────────────────────────────────────────
-LEARN_RATE = 1e-2
-BATCH    = 16
-EPOCH = 50
-IMG_SIZE = 256
+LEARN_RATE = 1e-3
+BATCH    = 8
+EPOCH = 100
+IMG_SIZE = 524
 autotune = True
 
 # ───── load paths / labels & stratified split ────────────────────
@@ -55,13 +66,7 @@ test_ds = utils.make_dataset(test_paths, test_labels, BATCH, shuffle=False, auto
 
 # ───── sanity-plot one val batch with augmentations ────────────────
 utils.show_image_of_batch(train_ds, le)
-# ───── class weights to regularize differently sized categories ───────────
-cw_vals = class_weight.compute_class_weight(
-    class_weight = 'balanced',
-    classes = np.unique(train_labels),
-    y = train_labels
-)
-class_w = dict(enumerate(cw_vals))
+
 
 def build_model():
     filters = 128
@@ -122,33 +127,40 @@ lr_cb = tf.keras.callbacks.ReduceLROnPlateau(monitor="loss",
                                              factor = 0.25, 
                                              patience = 3, 
                                              min_lr = 1e-6,
-                                             min_delta = 0.01)
+                                             min_delta = 0.05)
 
-ALRCLoss_fn = ALRCLoss(
-    num_stddev = 2,
-    decay = 0.999,
-    mu1_start = 0.85,
-    mu2_start = 0.90**2
-)
-# loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
+dyn_cb = utils.DynamicMinDelta(reduce_cb = lr_cb, ratio=0.01)
+
 
 model = build_model()
 model.compile(optimizer = tf.keras.optimizers.Adam(LEARN_RATE),
-              loss = ALRCLoss_fn, 
+              loss = sparse_focal_loss(), 
               metrics=["accuracy"])
 model.summary()
 
 lr_printer = LrPrinter()
 
+early_dual_cb = DualEarlyStopping(
+    min_delta_train = 0.01,   # x
+    min_delta_val   = 0.01,    # y
+    patience        = 5,
+    restore_best_weights = True
+)
+
 history = model.fit(
     train_ds,
     validation_data=val_ds,
     epochs = EPOCH,
-    callbacks=[ConfusionMatrixSaver(val_ds, le.classes_, every=3),  
+    callbacks=[early_dual_cb,
                lr_printer,
                csv_logger_cb(),
-               lr_cb
+               dyn_cb,
+               lr_cb,
+               tensorboard_cb
                ]
 )
 model.save("model_trained.keras")
+print(f"\n✅  Training finished — logs written to:  {log_dir}")
+print("💡  Launch TensorBoard with:\n"
+      f"    tensorboard --logdir {os.path.abspath('logs')}")
 

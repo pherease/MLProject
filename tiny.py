@@ -64,7 +64,7 @@ cw_vals = class_weight.compute_class_weight(
 class_w = dict(enumerate(cw_vals))
 
 def build_model():
-    filters = 128
+    filters = 32
     model = tf.keras.Sequential([
         layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3)),
 
@@ -124,17 +124,11 @@ lr_cb = tf.keras.callbacks.ReduceLROnPlateau(monitor="loss",
                                              min_lr = 1e-6,
                                              min_delta = 0.01)
 
-ALRCLoss_fn = ALRCLoss(
-    num_stddev = 2,
-    decay = 0.999,
-    mu1_start = 0.85,
-    mu2_start = 0.90**2
-)
-# loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
+loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
 
 model = build_model()
 model.compile(optimizer = tf.keras.optimizers.Adam(LEARN_RATE),
-              loss = ALRCLoss_fn, 
+              loss = loss,
               metrics=["accuracy"])
 model.summary()
 
@@ -144,10 +138,10 @@ history = model.fit(
     train_ds,
     validation_data=val_ds,
     epochs = EPOCH,
-    callbacks=[ConfusionMatrixSaver(val_ds, le.classes_, every=3),  
+    class_weight = class_w, 
+    callbacks=[ConfusionMatrixSaver(val_ds, label_names= le.classes_, every=3),  
                lr_printer,
-               csv_logger_cb(),
-               lr_cb
+               csv_logger_cb()
                ]
 )
 model.save("model_trained.keras")

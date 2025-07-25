@@ -46,13 +46,14 @@ csv_data = {'train': [], 'val': [], 'test': []}
 
 for cls in tqdm(classes, desc="Processing classes"):
     cls_dir = os.path.join(input_dir, cls)
-    images = [f for f in os.listdir(cls_dir) if os.path.isfile(os.path.join(cls_dir, f))]
+    images = [f for f in os.listdir(cls_dir)
+          if os.path.isfile(os.path.join(cls_dir, f)) and f.lower().endswith(('.jpg', '.jpeg', '.png'))]
 
     train_val_split, test_split = train_test_split(images, test_size=split_ratios[2], random_state=42)
     train_split, val_split = train_test_split(
         train_val_split,
         test_size=split_ratios[1]/(split_ratios[0]+split_ratios[1]),
-        random_state=42
+        random_state=424
     )
 
     # ------------------------------

@@ -172,13 +172,24 @@ def show_image_of_batch(ds: tf.data.Dataset, le: LabelEncoder) -> None:
 
 def show_dataset_class_distribution(name, arr):
     c = collections.Counter(arr)
-    print(f"{name} {dict(sorted(c.items()))}  (total: {sum(c.values())})")
+    print(f"{name} {dict(sorted(c.items()))}  (total: {sum(c.values())})" + " -- total images:")
 
 class ConfusionMatrixSaver(tf.keras.callbacks.Callback):
-    """Compute CM rarely & on *sub-sample* of val set to save time."""
-    def __init__(self, val_ds, label_names,
-                 every=5,          # only every N epochs
-                 out_dir="cm_plots"):
+    """Compute a *row‑normalised* confusion matrix (ratios) on the validation set
+    and save it every ``every`` epochs.
+
+    The matrix is normalised with ``normalize='true'`` so each row (i.e. each
+    ground‑truth class) sums to 1.  This highlights class‑specific recall while
+    keeping the colour map intuitive.
+    """
+
+    def __init__(
+        self,
+        val_ds: tf.data.Dataset,
+        label_names: Sequence[str],
+        every,  # run every N epochs
+        out_dir: str | pathlib.Path = "cm_plots",
+    ) -> None:
         super().__init__()
         self.val_ds = val_ds
         self.label_names = label_names
@@ -186,22 +197,40 @@ class ConfusionMatrixSaver(tf.keras.callbacks.Callback):
         self.out_dir = pathlib.Path(out_dir)
         self.out_dir.mkdir(exist_ok=True)
 
-    def on_epoch_end(self, epoch, _):
-        if (epoch + 1) % self.every:       # quick check ⇒ skip
+    def on_epoch_end(self, epoch: int, logs=None):  # noqa: D401  (callback signature)
+        # Skip unless it's one of the requested epochs (1‑based indexing)
+        if (epoch + 1) % self.every:
             return
 
-        y_true, y_pred = [], []
-        for x, y in self.val_ds:
-            y_pred.extend(np.argmax(self.model(x, training=False), axis=1))
-            y_true.extend(y.numpy())
+        # Collect predictions
+        y_true: list[int] = []
+        y_pred: list[int] = []
+        for x_batch, y_batch in self.val_ds:
+            preds = self.model(x_batch, training=False)
+            y_pred.extend(tf.argmax(preds, axis=1).numpy())
+            y_true.extend(y_batch.numpy())
 
-        cm = confusion_matrix(y_true, y_pred)
+        # Row‑normalised confusion matrix (ratios)
+        cm = confusion_matrix(y_true, y_pred, normalize="true")
+
+        # Plot and save
         fig, ax = plt.subplots(figsize=(10, 10))
-        ConfusionMatrixDisplay(cm, display_labels=self.label_names).plot(
-            xticks_rotation=60, cmap="Blues", ax=ax, values_format="d")
-        ax.set_title(f"Epoch {epoch+1}")
-        fig.savefig(self.out_dir / f"cm_epoch_{epoch+1:03d}.png")
+        disp = ConfusionMatrixDisplay(
+            cm, display_labels=self.label_names
+        )
+        disp.plot(
+            xticks_rotation=60,
+            cmap="Blues",
+            ax=ax,
+            values_format=".2f",  # show ratios with two decimals
+        )
+        ax.set_title(f"Epoch {epoch + 1}")
+
+        # Tight layout so y‑axis label is not cropped
+        fig.tight_layout()
+        fig.savefig(self.out_dir / f"cm_epoch_{epoch + 1:03d}.png", bbox_inches="tight")
         plt.close(fig)
+
 
 class LrPrinter(tf.keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):

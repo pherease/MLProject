@@ -134,9 +134,12 @@ def build_model(hp):
 
 lr_cb = tf.keras.callbacks.ReduceLROnPlateau(monitor="loss", 
                                              factor = 0.25, 
-                                             patience = 3, 
+                                             patience = 5, 
                                              min_lr = 1e-6,
-                                             min_delta = 0.005)
+                                             min_delta = 0.0)
+
+dyn_cb = utils.DynamicMinDelta(reduce_cb = lr_cb, ratio=0.01)
+
 
 
 tuner = RandomSearch(
@@ -159,7 +162,9 @@ tuner.search(
     validation_data = val_ds,
     epochs = 50,
     callbacks=[tensorboard_cb,
-               lr_cb]
+               dyn_cb,
+               lr_cb
+               ]
 )
 
 best_hp = tuner.get_best_hyperparameters()[0]
@@ -175,6 +180,7 @@ history = model.fit(
         utils.ConfusionMatrixSaver(val_ds, le.classes_, every=3),
         utils.checkpoint_cb(),
         utils.csv_logger_cb(),
-        lr_cb
+        dyn_cb,
+        lr_cb        
     ]
 )

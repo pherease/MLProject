@@ -12,8 +12,7 @@ import utils
 from sklearn.utils import class_weight
 from datetime import datetime     
 from tensorflow.keras import layers, mixed_precision
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from utils import ConfusionMatrixSaver, csv_logger_cb, checkpoint_cb, make_augment, LrPrinter
+from utils import ConfusionMatrixSaver, csv_logger_cb, checkpoint_cb, make_augment, LrPrinter, DualEarlyStopping
 
 
 # ───── reproducibility & logging ──────────────────────────────────

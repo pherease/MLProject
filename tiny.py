@@ -137,6 +137,7 @@ model = build_model()
 model.compile(optimizer = tf.keras.optimizers.Adam(LEARN_RATE),
               loss = sparse_focal_loss(), 
               metrics=["accuracy"])
+
 model.summary()
 
 lr_printer = LrPrinter()
@@ -152,14 +153,15 @@ history = model.fit(
     train_ds,
     validation_data=val_ds,
     epochs = EPOCH,
+
     callbacks=[early_dual_cb,
                lr_printer,
                csv_logger_cb(),
                dyn_cb,
                lr_cb,
-               tensorboard_cb
-               ]
+               tensorboard_cb]
 )
+
 model.save("model_trained.keras")
 print(f"\n✅  Training finished — logs written to:  {log_dir}")
 print("💡  Launch TensorBoard with:\n"
